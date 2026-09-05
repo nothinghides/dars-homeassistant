@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.1.0';
+const DARS_CARD_VERSION = '0.2.1';
 const LEAFLET_VER = '1.9.4';
 
 // Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
@@ -51,6 +51,12 @@ class DarsMapCard extends HTMLElement {
   }
 
   getCardSize() { return 9; }
+
+  // Visual editor hooks (HA card UI).
+  static getConfigElement() { return document.createElement('dars-map-card-editor'); }
+  static getStubConfig() {
+    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_operator: true };
+  }
 
   set hass(hass) {
     this._hass = hass;
@@ -271,6 +277,43 @@ class DarsMapCard extends HTMLElement {
 }
 
 customElements.define('dars-map-card', DarsMapCard);
+
+// ---- visual editor (uses HA's native ha-form) ---------------------------
+const DARS_EDITOR_SCHEMA = [
+  { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
+  { name: 'title', selector: { text: {} } },
+  { name: 'show_operator', selector: { boolean: {} } },
+];
+const DARS_EDITOR_LABELS = {
+  entity: 'Drones entity',
+  title: 'Card title',
+  show_operator: 'Show operator location',
+};
+
+class DarsMapCardEditor extends HTMLElement {
+  setConfig(config) { this._config = { ...config }; this._render(); }
+  set hass(hass) { this._hass = hass; this._render(); }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement('ha-form');
+      this._form.computeLabel = (s) => DARS_EDITOR_LABELS[s.name] || s.name;
+      this._form.addEventListener('value-changed', (e) => {
+        e.stopPropagation();
+        this.dispatchEvent(new CustomEvent('config-changed', {
+          detail: { config: e.detail.value }, bubbles: true, composed: true,
+        }));
+      });
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = DARS_EDITOR_SCHEMA;
+    this._form.data = this._config;
+  }
+}
+customElements.define('dars-map-card-editor', DarsMapCardEditor);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'dars-map-card',
