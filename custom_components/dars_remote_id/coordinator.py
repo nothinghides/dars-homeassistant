@@ -217,3 +217,20 @@ class DarsCoordinator:
         if not located:
             return None
         return max(located, key=lambda d: d.rssi if d.rssi is not None else -999)
+
+    @callback
+    def active_serials(self) -> set[str]:
+        """Serials (uasId) of currently-detected, serial-identified drones.
+        Per-drone trackers are keyed by serial so a drone that rotates its BLE
+        MAC keeps ONE tracker rather than spawning a new entity each time."""
+        return {d.uas_id for d in self.drones.values() if d.uas_id}
+
+    @callback
+    def drone_for_serial(self, serial: str) -> DarsDrone | None:
+        """The freshest currently-active drone reporting this serial, or None if
+        no active drone has it right now."""
+        best: DarsDrone | None = None
+        for d in self.drones.values():
+            if d.uas_id == serial and (best is None or d.last > best.last):
+                best = d
+        return best

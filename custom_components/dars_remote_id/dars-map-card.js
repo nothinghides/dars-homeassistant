@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.2.1';
+const DARS_CARD_VERSION = '0.2.2';
 const LEAFLET_VER = '1.9.4';
 
 // Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
@@ -41,6 +41,15 @@ function darsLoadLeaflet() {
 const esc = (s) =>
   String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Top-down quadcopter glyph for drone markers (green, glowing).
+const DRONE_SVG =
+  '<svg class="mk-drone" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">' +
+  '<g fill="none" stroke="#00FF41" stroke-width="1.6">' +
+  '<circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/>' +
+  '<circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/>' +
+  '<line x1="8" y1="8" x2="16" y2="16"/><line x1="16" y1="8" x2="8" y2="16"/></g>' +
+  '<circle cx="12" cy="12" r="2.6" fill="#00FF41"/></svg>';
 
 class DarsMapCard extends HTMLElement {
   setConfig(config) {
@@ -106,6 +115,7 @@ class DarsMapCard extends HTMLElement {
         .mk { width:16px; height:16px; border-radius:50%; border:2px solid var(--bg2);
               box-shadow:0 0 0 2px rgba(0,0,0,.5); }
         .mk.drone { background:var(--g); box-shadow:0 0 10px var(--g); }
+        .mk-drone { filter:drop-shadow(0 0 4px var(--g)); display:block; }
         .mk.op { background:#F4A62A; border-radius:2px; transform:rotate(45deg); }
         .mk.home { background:#3aa0ff; }
         .leaflet-popup-content { font-family:'Inter',system-ui,sans-serif; }
@@ -213,7 +223,7 @@ class DarsMapCard extends HTMLElement {
       let m = this._markers[d.mac];
       if (!m) {
         m = { drone: L.marker(ll, {
-          icon: L.divIcon({ className: '', html: '<div class="mk drone"></div>', iconSize: [16, 16] }),
+          icon: L.divIcon({ className: '', html: DRONE_SVG, iconSize: [26, 26], iconAnchor: [13, 13] }),
         }).addTo(this._map) };
         this._markers[d.mac] = m;
       } else {
