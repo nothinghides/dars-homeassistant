@@ -48,6 +48,33 @@ the `drones` attribute to history.
 Manual install: copy `custom_components/dars_remote_id/` into your HA
 `config/custom_components/` and restart.
 
+## Map card (optional) — install without HACS
+
+The `www/dars-map-card.js` card renders a live D.A.R.S.-styled map of every
+detected drone (marker per drone + operator, tether line, popups, and a detection
+list) from the integration's `sensor.dars_active_drones` entity. It's a **viewer**
+— the integration above is what connects to the receiver and supplies the data.
+
+Install it manually (no HACS needed):
+
+1. Copy **`www/dars-map-card.js`** into your HA **`config/www/`** folder (create
+   `www` if it doesn't exist). It's now served at `/local/dars-map-card.js`.
+2. **Settings → Dashboards → ⋮ (top-right) → Resources → + Add Resource**
+   → URL `/local/dars-map-card.js`, type **JavaScript Module**. (YAML-mode
+   dashboards: add it under `lovelace: resources:` and restart.)
+3. Add the card to a dashboard:
+
+   ```yaml
+   type: custom:dars-map-card
+   entity: sensor.dars_active_drones   # optional (this is the default)
+   title: Drone Map                    # optional
+   ```
+
+The map uses Leaflet + OpenStreetMap loaded from a CDN, so the **browser viewing
+the dashboard needs internet**; if it's offline the card falls back to the
+detection list (which always works). Drones without a GPS fix are listed but not
+placed on the map.
+
 ## How it works
 
 The receiver exposes a GATT service `0xFFF1` with a notify characteristic
