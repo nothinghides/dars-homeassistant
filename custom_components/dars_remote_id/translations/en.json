@@ -1,0 +1,36 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Add a D.A.R.S. receiver",
+        "description": "Select the D.A.R.S. receiver to connect to over Bluetooth.",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "confirm": {
+        "title": "Add a D.A.R.S. receiver",
+        "description": "Do you want to set up {name}?"
+      }
+    },
+    "abort": {
+      "no_devices_found": "No unconfigured D.A.R.S. receivers were found in Bluetooth range. Make sure the device is powered on and nearby.",
+      "already_configured": "This receiver is already configured."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "drone_detected": { "name": "Drone detected" },
+      "connected": { "name": "Receiver connected" }
+    },
+    "sensor": {
+      "drone_count": { "name": "Active drones" },
+      "nearest_id": { "name": "Nearest drone ID" },
+      "nearest_rssi": { "name": "Nearest drone signal" }
+    },
+    "device_tracker": {
+      "nearest_drone": { "name": "Nearest drone" }
+    }
+  }
+}
