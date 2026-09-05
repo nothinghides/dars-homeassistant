@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.3.0';
+const DARS_CARD_VERSION = '0.3.1';
 const LEAFLET_VER = '1.9.4';
 
 // Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
@@ -181,8 +181,22 @@ class DarsMapCard extends HTMLElement {
       .then((L) => this._initMap(L))
       .catch((e) => {
         this._el.map.style.display = 'none';
-        this._warn('Map unavailable (' + e.message + '). Detection list still works.');
+        this._mapWarn = 'Map unavailable (' + e.message + '). Detection list still works.';
+        this._update(true);
       });
+  }
+
+  // Resolve which entity to read: the configured one if it exists, otherwise
+  // auto-detect the D.A.R.S. "active drones" sensor by its `drones` attribute
+  // (its entity_id varies with the device name, e.g. sensor.dars_c5_active_drones).
+  _resolveEntity() {
+    if (this._hass.states[this._entity]) return this._entity;
+    for (const id in this._hass.states) {
+      if (id.indexOf('sensor.') !== 0) continue;
+      const a = this._hass.states[id].attributes;
+      if (a && Array.isArray(a.drones)) return id;
+    }
+    return this._entity;
   }
 
   _initMap(L) {
@@ -209,12 +223,17 @@ class DarsMapCard extends HTMLElement {
   // ---- per-update: markers + list ---------------------------------------
   _update(force) {
     if (!this._hass || !this._el) return;
-    const st = this._hass.states[this._entity];
-    if (!st) { this._warn(`Entity "${this._entity}" not found — is the D.A.R.S. integration set up?`); return; }
+    const eid = this._resolveEntity();
+    const st = this._hass.states[eid];
+    if (!st) {
+      this._warn(`No D.A.R.S. "active drones" sensor found — is the integration set up? (configured: "${this._entity}")`);
+      return;
+    }
+    this._warn(this._mapWarn || '');   // clear the not-found notice once resolved
     const drones = Array.isArray(st.attributes.drones) ? st.attributes.drones : [];
 
     // Skip redundant re-renders (hass fires on every state change).
-    const sig = st.last_changed + '|' + drones.length;
+    const sig = eid + '|' + st.last_changed + '|' + drones.length;
     if (!force && sig === this._sig) return;
     this._sig = sig;
 
