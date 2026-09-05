@@ -48,27 +48,34 @@ the `drones` attribute to history.
 Manual install: copy `custom_components/dars_remote_id/` into your HA
 `config/custom_components/` and restart.
 
-## Map card (optional) — install without HACS
+## Map card — bundled, no separate install
 
-The `www/dars-map-card.js` card renders a live D.A.R.S.-styled map of every
-detected drone (marker per drone + operator, tether line, popups, and a detection
-list) from the integration's `sensor.dars_active_drones` entity. It's a **viewer**
-— the integration above is what connects to the receiver and supplies the data.
+The integration **ships and auto-loads** a D.A.R.S.-styled map card
+(`dars-map-card.js`) that plots every detected drone (marker per drone + operator,
+tether line, popups, and a detection list) from `sensor.dars_active_drones`. It's
+a **viewer** — the integration is what connects to the receiver and supplies the
+data.
 
-Install it manually (no HACS needed):
+Nothing to install for the card: after the integration is set up (HACS or manual)
+and Home Assistant is restarted, just add it to a dashboard:
 
-1. Copy **`www/dars-map-card.js`** into your HA **`config/www/`** folder (create
-   `www` if it doesn't exist). It's now served at `/local/dars-map-card.js`.
-2. **Settings → Dashboards → ⋮ (top-right) → Resources → + Add Resource**
-   → URL `/local/dars-map-card.js`, type **JavaScript Module**. (YAML-mode
-   dashboards: add it under `lovelace: resources:` and restart.)
-3. Add the card to a dashboard:
+```yaml
+type: custom:dars-map-card
+entity: sensor.dars_active_drones   # optional (this is the default)
+title: Drone Map                    # optional
+```
 
-   ```yaml
-   type: custom:dars-map-card
-   entity: sensor.dars_active_drones   # optional (this is the default)
-   title: Drone Map                    # optional
-   ```
+The integration serves the card at `/dars_remote_id/dars-map-card.js` and
+registers it as a frontend module automatically — no `www/` copy, no Lovelace
+resource entry needed. (Hard-refresh the browser once after updating so the new
+card JS is fetched.)
+
+<details><summary>Manual card install (only if you're not using the integration's copy)</summary>
+
+Copy **`www/dars-map-card.js`** into `config/www/`, then **Settings → Dashboards →
+⋮ → Resources → + Add Resource** → `/local/dars-map-card.js`, type **JavaScript
+Module**.
+</details>
 
 The map uses Leaflet + OpenStreetMap loaded from a CDN, so the **browser viewing
 the dashboard needs internet**; if it's offline the card falls back to the
