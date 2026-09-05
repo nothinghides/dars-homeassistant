@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.3.1';
+const DARS_CARD_VERSION = '0.3.2';
 const LEAFLET_VER = '1.9.4';
 
 // Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
@@ -350,7 +350,11 @@ class DarsMapCard extends HTMLElement {
   }
 }
 
-customElements.define('dars-map-card', DarsMapCard);
+// Guarded so the module is safe to load twice (e.g. the integration's auto-load
+// AND a manually-added Lovelace resource for the companion app).
+if (!customElements.get('dars-map-card')) {
+  customElements.define('dars-map-card', DarsMapCard);
+}
 
 // ---- visual editor (uses HA's native ha-form) ---------------------------
 const DARS_EDITOR_SCHEMA = [
@@ -386,15 +390,19 @@ class DarsMapCardEditor extends HTMLElement {
     this._form.data = this._config;
   }
 }
-customElements.define('dars-map-card-editor', DarsMapCardEditor);
+if (!customElements.get('dars-map-card-editor')) {
+  customElements.define('dars-map-card-editor', DarsMapCardEditor);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'dars-map-card',
-  name: 'D.A.R.S. Drone Map',
-  description: 'Live map of drones detected by a D.A.R.S. receiver.',
-  preview: false,
-});
+if (!window.customCards.some((c) => c.type === 'dars-map-card')) {
+  window.customCards.push({
+    type: 'dars-map-card',
+    name: 'D.A.R.S. Drone Map',
+    description: 'Live map of drones detected by a D.A.R.S. receiver.',
+    preview: false,
+  });
+}
 console.info(`%c D.A.R.S. Drone Map %c v${DARS_CARD_VERSION} `,
   'background:#00FF41;color:#020101;font-weight:700;border-radius:3px 0 0 3px;padding:2px 6px',
   'background:#0d0d0d;color:#00FF41;border-radius:0 3px 3px 0;padding:2px 6px');
