@@ -26,6 +26,13 @@ Automation ideas: announce on a speaker when *Drone detected* turns on, flash a
 light, push a phone notification with the nearest drone's ID and distance, or log
 the `drones` attribute to history.
 
+## Integration icon
+
+HA shows an integration's logo from the central `home-assistant/brands` repo (a
+custom component can't ship its own brand icon). Ready-to-submit icons are in
+[`brands/`](brands/) — see that folder's README to add them via a brands PR.
+Until merged, HA shows a generic placeholder; functionality is unaffected.
+
 ## Requirements
 
 - Home Assistant **2024.8** or newer with a working **Bluetooth** adapter in

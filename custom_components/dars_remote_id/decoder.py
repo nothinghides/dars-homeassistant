@@ -105,8 +105,8 @@ class DarsDrone:
             "height_m": round(self.height) if self.height is not None else None,
             "speed_mps": round(self.speed, 1) if self.speed is not None else None,
             "heading": round(self.heading) if self.heading is not None else None,
-            "operator_lat": round(self.op_lat, 6) if self.op_lat is not None else None,
-            "operator_lon": round(self.op_lon, 6) if self.op_lon is not None else None,
+            "takeoff_lat": round(self.op_lat, 6) if self.op_lat is not None else None,
+            "takeoff_lon": round(self.op_lon, 6) if self.op_lon is not None else None,
         }
 
 

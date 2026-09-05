@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.2.2';
+const DARS_CARD_VERSION = '0.3.0';
 const LEAFLET_VER = '1.9.4';
 
 // Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
@@ -42,20 +42,40 @@ const esc = (s) =>
   String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Top-down quadcopter glyph for drone markers (green, glowing).
-const DRONE_SVG =
-  '<svg class="mk-drone" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">' +
-  '<g fill="none" stroke="#00FF41" stroke-width="1.6">' +
-  '<circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/>' +
-  '<circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/>' +
-  '<line x1="8" y1="8" x2="16" y2="16"/><line x1="16" y1="8" x2="8" y2="16"/></g>' +
-  '<circle cx="12" cy="12" r="2.6" fill="#00FF41"/></svg>';
+// Marker palette matching the D.A.R.S. app ("Set B"): the first drone is the
+// brand green, then a fixed distinct palette cycles. A drone and its take-off
+// point share one colour so pairs are easy to tell apart.
+const DARS_PALETTE = ['#00FF41', '#F4A62A', '#E93D82', '#8B5CF6', '#FF4D4D', '#2E9BFF', '#00B8A9'];
+
+// Drone marker: a heading-pointing chevron (points north at 0°, rotated to
+// heading), coloured fill with a white outline — same shape the app draws.
+function droneIconHtml(color, heading) {
+  const rot = Number.isFinite(heading) ? heading : 0;
+  return (
+    '<div style="transform:rotate(' + rot + 'deg);transform-origin:50% 50%;' +
+    'filter:drop-shadow(0 0 2px rgba(0,0,0,.7))">' +
+    '<svg viewBox="0 0 32 32" width="30" height="30">' +
+    '<path d="M16 4 L26.5 26 L16 19.5 L5.5 26 Z" fill="' + color + '" ' +
+    'stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg></div>'
+  );
+}
+// Take-off marker: a white disc with a coloured ring and a coloured "H".
+function takeoffIconHtml(color) {
+  return (
+    '<div style="filter:drop-shadow(0 0 2px rgba(0,0,0,.7))">' +
+    '<svg viewBox="0 0 32 32" width="26" height="26">' +
+    '<circle cx="16" cy="16" r="11" fill="#fff" stroke="' + color + '" stroke-width="3"/>' +
+    '<text x="16" y="21.5" text-anchor="middle" font-family="Arial,sans-serif" ' +
+    'font-size="15" font-weight="800" fill="' + color + '">H</text></svg></div>'
+  );
+}
 
 class DarsMapCard extends HTMLElement {
   setConfig(config) {
     this._entity = (config && config.entity) || 'sensor.dars_active_drones';
     this._title = (config && config.title) || 'D.A.R.S. — Drone Map';
-    this._showOperator = config && config.show_operator === false ? false : true;
+    // Accept the old `show_operator` key too, for configs saved before the rename.
+    this._showTakeoff = !(config && (config.show_takeoff === false || config.show_operator === false));
     this._config = config || {};
   }
 
@@ -64,7 +84,7 @@ class DarsMapCard extends HTMLElement {
   // Visual editor hooks (HA card UI).
   static getConfigElement() { return document.createElement('dars-map-card-editor'); }
   static getStubConfig() {
-    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_operator: true };
+    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_takeoff: true };
   }
 
   set hass(hass) {
@@ -74,9 +94,21 @@ class DarsMapCard extends HTMLElement {
   }
 
   // ---- one-time DOM + map setup -----------------------------------------
+  // Stable per-drone colour (keyed by MAC): first drone -> brand green, then the
+  // palette cycles — matches the app so a drone + its take-off + list row match.
+  _colorFor(mac) {
+    if (this._colorIdx[mac] == null) {
+      this._colorIdx[mac] = this._nextColor % DARS_PALETTE.length;
+      this._nextColor += 1;
+    }
+    return DARS_PALETTE[this._colorIdx[mac]];
+  }
+
   _build() {
     this._built = true;
-    this._markers = {};            // mac -> {drone, operator, line}
+    this._markers = {};            // mac -> {drone, takeoff, line}
+    this._colorIdx = {};
+    this._nextColor = 0;
     this.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `
       <!-- Leaflet CSS must live INSIDE the shadow root or it can't style the map. -->
@@ -118,7 +150,12 @@ class DarsMapCard extends HTMLElement {
         .mk-drone { filter:drop-shadow(0 0 4px var(--g)); display:block; }
         .mk.op { background:#F4A62A; border-radius:2px; transform:rotate(45deg); }
         .mk.home { background:#3aa0ff; }
-        .leaflet-popup-content { font-family:'Inter',system-ui,sans-serif; }
+        /* Dark popups to match the D.A.R.S. theme (bright marker colours stay legible). */
+        .leaflet-popup-content-wrapper { background:#0d0d0d; color:#ddd; border:1px solid var(--bd); border-radius:8px; }
+        .leaflet-popup-tip { background:#0d0d0d; border:1px solid var(--bd); }
+        .leaflet-popup-content { font-family:'Inter',system-ui,sans-serif; color:#cfcfcf; }
+        .leaflet-popup-content b { color:#fff; }
+        .leaflet-container a.leaflet-popup-close-button { color:#888; }
       </style>
       <ha-card>
         <div class="card">
@@ -196,7 +233,7 @@ class DarsMapCard extends HTMLElement {
         if (d.speed_mps != null) bits.push(`${d.speed_mps} m/s`);
         if (d.heading != null) bits.push(`${d.heading}°`);
         return `<div class="row" data-mac="${esc(d.mac)}">
-            <div class="id">${id}</div>
+            <div class="id" style="color:${this._colorFor(d.mac)}">${id}</div>
             <div class="rssi">${d.rssi != null ? d.rssi + ' dBm' : ''}</div>
             <div class="meta"><span class="tag">${esc(d.source || '')}</span> ${esc(bits.join(' · '))}</div>
           </div>`;
@@ -218,35 +255,41 @@ class DarsMapCard extends HTMLElement {
     for (const d of drones) {
       if (d.lat == null || d.lon == null) continue;
       seen.add(d.mac);
+      const color = this._colorFor(d.mac);
       const ll = [d.lat, d.lon];
       bounds.push(ll);
+      const dIcon = L.divIcon({
+        className: '', html: droneIconHtml(color, d.heading), iconSize: [30, 30], iconAnchor: [15, 15],
+      });
       let m = this._markers[d.mac];
       if (!m) {
-        m = { drone: L.marker(ll, {
-          icon: L.divIcon({ className: '', html: DRONE_SVG, iconSize: [26, 26], iconAnchor: [13, 13] }),
-        }).addTo(this._map) };
+        m = { drone: L.marker(ll, { icon: dIcon }).addTo(this._map) };
         this._markers[d.mac] = m;
       } else {
         m.drone.setLatLng(ll);
+        m.drone.setIcon(dIcon);            // refresh heading rotation
       }
-      m.drone.bindPopup(this._popup(d));
+      m.drone.bindPopup(this._popup(d, color));
 
-      // Operator marker + tether line.
-      if (this._showOperator && d.operator_lat != null && d.operator_lon != null) {
-        const oll = [d.operator_lat, d.operator_lon];
+      // Take-off marker (ODID System location) + coloured tether to the drone.
+      const tlat = d.takeoff_lat != null ? d.takeoff_lat : d.operator_lat;
+      const tlon = d.takeoff_lon != null ? d.takeoff_lon : d.operator_lon;
+      if (this._showTakeoff && tlat != null && tlon != null) {
+        const oll = [tlat, tlon];
         bounds.push(oll);
-        if (!m.operator) {
-          m.operator = L.marker(oll, {
-            icon: L.divIcon({ className: '', html: '<div class="mk op"></div>', iconSize: [16, 16] }),
-          }).addTo(this._map).bindPopup('Operator');
-          m.line = L.polyline([ll, oll], { color: '#F4A62A', weight: 1, opacity: 0.5, dashArray: '4 4' }).addTo(this._map);
+        const tIcon = L.divIcon({
+          className: '', html: takeoffIconHtml(color), iconSize: [26, 26], iconAnchor: [13, 13],
+        });
+        if (!m.takeoff) {
+          m.takeoff = L.marker(oll, { icon: tIcon }).addTo(this._map).bindPopup('Take-off');
+          m.line = L.polyline([ll, oll], { color, weight: 1.5, opacity: 0.55, dashArray: '4 5' }).addTo(this._map);
         } else {
-          m.operator.setLatLng(oll);
-          m.line.setLatLngs([ll, oll]);
+          m.takeoff.setLatLng(oll); m.takeoff.setIcon(tIcon);
+          m.line.setLatLngs([ll, oll]); m.line.setStyle({ color });
         }
-      } else if (m.operator) {
-        this._map.removeLayer(m.operator); this._map.removeLayer(m.line);
-        m.operator = m.line = null;
+      } else if (m.takeoff) {
+        this._map.removeLayer(m.takeoff); this._map.removeLayer(m.line);
+        m.takeoff = m.line = null;
       }
     }
 
@@ -254,7 +297,7 @@ class DarsMapCard extends HTMLElement {
     for (const mac of Object.keys(this._markers)) {
       if (seen.has(mac)) continue;
       const m = this._markers[mac];
-      [m.drone, m.operator, m.line].forEach((l) => l && this._map.removeLayer(l));
+      [m.drone, m.takeoff, m.line].forEach((l) => l && this._map.removeLayer(l));
       delete this._markers[mac];
     }
 
@@ -266,17 +309,19 @@ class DarsMapCard extends HTMLElement {
     }
   }
 
-  _popup(d) {
+  _popup(d, color) {
     const line = (k, v) => (v != null && v !== '' ? `<div><b>${k}:</b> ${esc(v)}</div>` : '');
+    const tlat = d.takeoff_lat != null ? d.takeoff_lat : d.operator_lat;
+    const tlon = d.takeoff_lon != null ? d.takeoff_lon : d.operator_lon;
     return `<div style="min-width:150px">
-      <div style="font-weight:700;color:#0a7d20">${esc(d.id || d.mac)}</div>
+      <div style="font-weight:700;color:${color || '#00FF41'}">${esc(d.id || d.mac)}</div>
       ${line('Source', d.source)}
       ${line('RSSI', d.rssi != null ? d.rssi + ' dBm' : '')}
       ${line('Altitude', d.altitude_m != null ? d.altitude_m + ' m' : '')}
       ${line('Height', d.height_m != null ? d.height_m + ' m' : '')}
       ${line('Speed', d.speed_mps != null ? d.speed_mps + ' m/s' : '')}
       ${line('Heading', d.heading != null ? d.heading + '°' : '')}
-      ${d.operator_lat != null ? `<div><b>Operator:</b> ${esc(d.operator_lat)}, ${esc(d.operator_lon)}</div>` : ''}
+      ${tlat != null ? `<div><b>Take-off:</b> ${esc(tlat)}, ${esc(tlon)}</div>` : ''}
     </div>`;
   }
 
@@ -292,12 +337,12 @@ customElements.define('dars-map-card', DarsMapCard);
 const DARS_EDITOR_SCHEMA = [
   { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
   { name: 'title', selector: { text: {} } },
-  { name: 'show_operator', selector: { boolean: {} } },
+  { name: 'show_takeoff', selector: { boolean: {} } },
 ];
 const DARS_EDITOR_LABELS = {
   entity: 'Drones entity',
   title: 'Card title',
-  show_operator: 'Show operator location',
+  show_takeoff: 'Show take-off location',
 };
 
 class DarsMapCardEditor extends HTMLElement {
