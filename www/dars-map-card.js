@@ -13,29 +13,84 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.3.3';
+const DARS_CARD_VERSION = '0.4.0';
 const LEAFLET_VER = '1.9.4';
+const MAPLIBRE_VER = '4.7.1';
+const MGL_LEAFLET_VER = '0.0.22';
 
-// Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
-// if it fails the card degrades to the detection list. Shared across all cards.
-function darsLoadLeaflet() {
-  if (window.L && window.L.map) return Promise.resolve(window.L);
-  if (window.__darsLeaflet) return window.__darsLeaflet;
-  window.__darsLeaflet = new Promise((resolve, reject) => {
-    if (!document.querySelector('link[data-dars-leaflet]')) {
-      const css = document.createElement('link');
-      css.rel = 'stylesheet';
-      css.href = `https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css`;
-      css.setAttribute('data-dars-leaflet', '');
-      document.head.appendChild(css);
+// Base-map styles — the same free-for-commercial OpenFreeMap vector styles the
+// D.A.R.S. Android app uses (no API key). Default Fiord, matching the app.
+const DARS_MAP_STYLES = {
+  'Fiord': 'https://tiles.openfreemap.org/styles/fiord',
+  'Dark Matter': 'https://tiles.openfreemap.org/styles/dark',
+  'Positron': 'https://tiles.openfreemap.org/styles/positron',
+  'Liberty': 'https://tiles.openfreemap.org/styles/liberty',
+  'Bright': 'https://tiles.openfreemap.org/styles/bright',
+};
+const DARS_MAP_STYLE_DEFAULT = 'Fiord';
+const DARS_STYLE_LS_KEY = 'dars-map-style';
+// Shown in the map's attribution control (© data + tiles). OpenFreeMap serves
+// OpenMapTiles-schema vector tiles built from OpenStreetMap data.
+const DARS_MAP_ATTR =
+  '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' +
+  ' contributors · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>' +
+  ' · <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a>';
+
+function darsSavedStyle() {
+  try { return localStorage.getItem(DARS_STYLE_LS_KEY); } catch (e) { return null; }
+}
+function darsSaveStyle(name) {
+  try { localStorage.setItem(DARS_STYLE_LS_KEY, name); } catch (e) { /* private mode */ }
+}
+
+function darsAddCss(href, tag) {
+  if (document.querySelector(`link[data-dars="${tag}"]`)) return;
+  const css = document.createElement('link');
+  css.rel = 'stylesheet';
+  css.href = href;
+  css.setAttribute('data-dars', tag);
+  document.head.appendChild(css);
+}
+function darsLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-dars-src="${src}"]`);
+    if (existing) {
+      if (existing.getAttribute('data-loaded')) return resolve();
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', () => reject(new Error('failed to load ' + src)));
+      return;
     }
-    const js = document.createElement('script');
-    js.src = `https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.js`;
-    js.onload = () => resolve(window.L);
-    js.onerror = () => reject(new Error('Leaflet failed to load (offline or blocked)'));
-    document.head.appendChild(js);
+    const s = document.createElement('script');
+    s.src = src;
+    s.setAttribute('data-dars-src', src);
+    s.onload = () => { s.setAttribute('data-loaded', '1'); resolve(); };
+    s.onerror = () => reject(new Error('failed to load ' + src));
+    document.head.appendChild(s);
   });
-  return window.__darsLeaflet;
+}
+
+// Load Leaflet + MapLibre GL + the maplibre-gl-leaflet bridge once (CDN, pinned).
+// Needs internet + WebGL on the *viewing* browser; if it fails the card degrades
+// to the detection list. The promise is shared across all cards on the page.
+function darsLoadMapLibs() {
+  if (window.__darsMapLibs) return window.__darsMapLibs;
+  window.__darsMapLibs = (async () => {
+    darsAddCss(`https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css`, 'leaflet');
+    darsAddCss(`https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.css`, 'maplibre');
+    if (!(window.L && window.L.map)) {
+      await darsLoadScript(`https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.js`);
+    }
+    if (!window.maplibregl) {
+      await darsLoadScript(`https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.js`);
+    }
+    if (!(window.L && window.L.maplibreGL)) {
+      await darsLoadScript(
+        `https://unpkg.com/@maplibre/maplibre-gl-leaflet@${MGL_LEAFLET_VER}/leaflet-maplibre-gl.js`);
+    }
+    if (!window.L || !window.L.maplibreGL) throw new Error('map libraries unavailable');
+    return window.L;
+  })();
+  return window.__darsMapLibs;
 }
 
 const esc = (s) =>
@@ -77,7 +132,7 @@ class DarsMapCard extends HTMLElement {
     // Accept the old `show_operator` key too, for configs saved before the rename.
     this._showTakeoff = !(config && (config.show_takeoff === false || config.show_operator === false));
     this._config = config || {};
-    this._mapStyle = (config && config.map_style) || 'Streets';
+    this._mapStyle = (config && config.map_style) || DARS_MAP_STYLE_DEFAULT;
   }
 
   getCardSize() { return 9; }
@@ -85,7 +140,7 @@ class DarsMapCard extends HTMLElement {
   // Visual editor hooks (HA card UI).
   static getConfigElement() { return document.createElement('dars-map-card-editor'); }
   static getStubConfig() {
-    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_takeoff: true, map_style: 'Streets' };
+    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_takeoff: true, map_style: DARS_MAP_STYLE_DEFAULT };
   }
 
   set hass(hass) {
@@ -112,8 +167,9 @@ class DarsMapCard extends HTMLElement {
     this._nextColor = 0;
     this.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `
-      <!-- Leaflet CSS must live INSIDE the shadow root or it can't style the map. -->
+      <!-- Leaflet + MapLibre CSS must live INSIDE the shadow root or the map can't be styled. -->
       <link rel="stylesheet" href="https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css" />
+      <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.css" />
       <style>
         :host { --g:#00FF41; --g-dim:#00cc33; --bg:#0d0d0d; --bg2:#020101;
                 --bd:#2a2a2a; --bd-hi:#3a3a3a; --muted:#8a8a8a; --white:#fff; }
@@ -157,14 +213,29 @@ class DarsMapCard extends HTMLElement {
         .leaflet-popup-content { font-family:'Inter',system-ui,sans-serif; color:#cfcfcf; }
         .leaflet-popup-content b { color:#fff; }
         .leaflet-container a.leaflet-popup-close-button { color:#888; }
-        /* Dark map-style switcher to match the theme */
-        .leaflet-control-layers { background:#0d0d0d; color:#ddd; border:1px solid var(--bd);
-                border-radius:8px; }
-        .leaflet-control-layers-expanded { padding:8px 10px; }
-        .leaflet-control-layers label { font-family:'Inter',system-ui,sans-serif; font-size:13px; }
-        .leaflet-control-layers-selector { accent-color:var(--g); }
         .leaflet-bar a { background:#0d0d0d; color:#ddd; border-bottom:1px solid var(--bd); }
         .leaflet-bar a:hover { background:#1a1a1a; }
+        /* Dark map-style switcher (dropdown) to match the theme */
+        .dars-style-ctl { background:#0d0d0d; border:1px solid var(--bd); border-radius:8px;
+                box-shadow:0 1px 4px rgba(0,0,0,.4); }
+        .dars-style-ctl select { background:#0d0d0d; color:#ddd; border:none; outline:none;
+                font-family:'Inter',system-ui,sans-serif; font-size:12px; font-weight:600;
+                padding:5px 6px; border-radius:8px; cursor:pointer; }
+        /* Map attribution (© data + tiles) kept legible on the dark theme */
+        .leaflet-control-attribution { background:rgba(13,13,13,.82) !important; color:#9a9a9a;
+                font-size:10px; }
+        .leaflet-control-attribution a { color:#00cc33; }
+        /* Attributions & licenses footer */
+        .attrib { border-top:1px solid var(--bd); font-size:11px; color:var(--muted); }
+        .attrib > summary { list-style:none; cursor:pointer; padding:9px 16px; user-select:none;
+                color:#7a7a7a; font-weight:600; letter-spacing:.02em; }
+        .attrib > summary::-webkit-details-marker { display:none; }
+        .attrib > summary::before { content:'ⓘ '; color:var(--g-dim); }
+        .attrib[open] > summary { color:#9a9a9a; }
+        .attrib-body { padding:0 16px 12px; line-height:1.55; }
+        .attrib-body a { color:#00cc33; text-decoration:none; }
+        .attrib-body a:hover { text-decoration:underline; }
+        .attrib-body b { color:#bdbdbd; font-weight:600; }
       </style>
       <ha-card>
         <div class="card">
@@ -176,6 +247,21 @@ class DarsMapCard extends HTMLElement {
           <div class="warn" id="warn" style="display:none"></div>
           <div id="map"></div>
           <div class="list" id="list"></div>
+          <details class="attrib">
+            <summary>Attributions &amp; licenses</summary>
+            <div class="attrib-body">
+              <b>Map</b> — © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+              contributors (ODbL). Tiles by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>
+              (free for any use); vector schema © <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a>.<br>
+              <b>Aircraft data</b> — make/model from the FAA
+              <a href="https://uasdoc.faa.gov/listdocs" target="_blank" rel="noopener">UAS Declaration of Compliance</a>
+              database (public product data).<br>
+              <b>Libraries</b> — <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> (BSD-2-Clause),
+              <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> (BSD-3-Clause),
+              <a href="https://github.com/maplibre/maplibre-gl-leaflet" target="_blank" rel="noopener">maplibre-gl-leaflet</a> (ISC).<br>
+              <b>D.A.R.S.</b> — © <a href="https://getdars.com" target="_blank" rel="noopener">getdars.com</a>.
+            </div>
+          </details>
         </div>
       </ha-card>`;
 
@@ -186,7 +272,7 @@ class DarsMapCard extends HTMLElement {
       list: this.shadowRoot.getElementById('list'),
     };
 
-    darsLoadLeaflet()
+    darsLoadMapLibs()
       .then((L) => this._initMap(L))
       .catch((e) => {
         this._el.map.style.display = 'none';
@@ -210,22 +296,37 @@ class DarsMapCard extends HTMLElement {
 
   _initMap(L) {
     this._L = L;
-    this._map = L.map(this._el.map, { attributionControl: false, zoomControl: true })
+    this._map = L.map(this._el.map, { attributionControl: true, zoomControl: true })
       .setView([this._hass.config.latitude || 0, this._hass.config.longitude || 0], 13);
+    this._map.attributionControl.setPrefix(false);
 
-    // Selectable base layers (all free, no key). Needs internet on the viewer.
-    const bases = {
-      'Streets': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }),
-      'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        { maxZoom: 20, subdomains: 'abcd' }),
-      'Satellite': L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19 }),
+    // Pick the starting style: the viewer's last manual choice (localStorage)
+    // wins, then the card's configured default, then Fiord.
+    const saved = darsSavedStyle();
+    this._styleName = (saved && DARS_MAP_STYLES[saved]) ? saved
+      : (DARS_MAP_STYLES[this._mapStyle] ? this._mapStyle : DARS_MAP_STYLE_DEFAULT);
+    this._addBaseLayer(this._styleName);
+
+    // Style switcher (dropdown, top-right) — the same styles as the D.A.R.S. app.
+    const ctl = L.control({ position: 'topright' });
+    ctl.onAdd = () => {
+      const div = L.DomUtil.create('div', 'dars-style-ctl');
+      const sel = document.createElement('select');
+      sel.title = 'Map style';
+      for (const name of Object.keys(DARS_MAP_STYLES)) {
+        const o = document.createElement('option');
+        o.value = name; o.textContent = name;
+        if (name === this._styleName) o.selected = true;
+        sel.appendChild(o);
+      }
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+      sel.addEventListener('change', () => this._setStyle(sel.value));
+      div.appendChild(sel);
+      return div;
     };
-    const startName = bases[this._mapStyle] ? this._mapStyle : 'Streets';
-    bases[startName].addTo(this._map);
-    L.control.layers(bases, null, { position: 'topright' }).addTo(this._map);
-    this._map.on('baselayerchange', (e) => { this._mapStyle = e.name; });
+    ctl.addTo(this._map);
+
     // Home / receiver location marker.
     if (this._hass.config.latitude != null) {
       this._home = L.marker([this._hass.config.latitude, this._hass.config.longitude], {
@@ -234,6 +335,26 @@ class DarsMapCard extends HTMLElement {
     }
     setTimeout(() => this._map && this._map.invalidateSize(), 200);
     this._update(true);
+  }
+
+  // Add the OpenFreeMap vector base layer (MapLibre GL under Leaflet). Kept
+  // behind the markers/overlays. The style's own attribution is augmented with
+  // our explicit © string so it always shows on the dark control.
+  _addBaseLayer(name) {
+    const L = this._L;
+    const url = DARS_MAP_STYLES[name] || DARS_MAP_STYLES[DARS_MAP_STYLE_DEFAULT];
+    this._glLayer = L.maplibreGL({ style: url, attribution: DARS_MAP_ATTR });
+    this._glLayer.addTo(this._map);
+  }
+
+  // Switch base map style; remember the choice per-viewer so it survives a
+  // refresh/restart. Re-creating the GL layer is the robust way to swap styles.
+  _setStyle(name) {
+    if (!this._map || !DARS_MAP_STYLES[name] || name === this._styleName) return;
+    this._styleName = name;
+    darsSaveStyle(name);
+    if (this._glLayer) { this._map.removeLayer(this._glLayer); this._glLayer = null; }
+    this._addBaseLayer(name);
   }
 
   _warn(msg) {
@@ -274,10 +395,15 @@ class DarsMapCard extends HTMLElement {
         if (d.height_m != null) bits.push(`${d.height_m} m AGL`);
         if (d.speed_mps != null) bits.push(`${d.speed_mps} m/s`);
         if (d.heading != null) bits.push(`${d.heading}°`);
+        const mm = [d.make, d.model].filter(Boolean).join(' ');
+        const modelLine = mm
+          ? `<div class="meta">${esc(mm)}${d.faa_registration ? ' · ' + esc(d.faa_registration) : ''}</div>`
+          : '';
         return `<div class="row" data-mac="${esc(d.mac)}">
             <div class="id" style="color:${this._colorFor(d.mac)}">${id}</div>
             <div class="rssi">${d.rssi != null ? d.rssi + ' dBm' : ''}</div>
             <div class="meta"><span class="tag">${esc(d.source || '')}</span> ${esc(bits.join(' · '))}</div>
+            ${modelLine}
           </div>`;
       }).join('');
       this._el.list.querySelectorAll('.row').forEach((row) => {
@@ -357,6 +483,9 @@ class DarsMapCard extends HTMLElement {
     const tlon = d.takeoff_lon != null ? d.takeoff_lon : d.operator_lon;
     return `<div style="min-width:150px">
       <div style="font-weight:700;color:${color || '#00FF41'}">${esc(d.id || d.mac)}</div>
+      ${line('Make', d.make)}
+      ${line('Model', d.model)}
+      ${line('FAA reg', d.faa_registration)}
       ${line('Source', d.source)}
       ${line('RSSI', d.rssi != null ? d.rssi + ' dBm' : '')}
       ${line('Height', d.height_m != null ? d.height_m + ' m AGL' : '')}
@@ -383,9 +512,11 @@ const DARS_EDITOR_SCHEMA = [
   { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
   { name: 'title', selector: { text: {} } },
   { name: 'map_style', selector: { select: { mode: 'dropdown', options: [
-    { value: 'Streets', label: 'Streets' },
-    { value: 'Dark', label: 'Dark' },
-    { value: 'Satellite', label: 'Satellite' },
+    { value: 'Fiord', label: 'Fiord (default)' },
+    { value: 'Dark Matter', label: 'Dark Matter' },
+    { value: 'Positron', label: 'Positron' },
+    { value: 'Liberty', label: 'Liberty' },
+    { value: 'Bright', label: 'Bright' },
   ] } } },
   { name: 'show_takeoff', selector: { boolean: {} } },
 ];

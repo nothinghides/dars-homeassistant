@@ -50,12 +50,7 @@ class DarsDroneCount(DarsEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        drones = sorted(
-            self.coordinator.drones.values(),
-            key=lambda d: d.rssi if d.rssi is not None else -999,
-            reverse=True,
-        )
-        return {"drones": [d.as_dict() for d in drones]}
+        return {"drones": self.coordinator.drone_payload()}
 
 
 class DarsNearestId(DarsEntity, SensorEntity):
@@ -78,7 +73,7 @@ class DarsNearestId(DarsEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         drone = self.coordinator.nearest()
-        return drone.as_dict() if drone else {}
+        return self.coordinator._faa_merge(drone, drone.as_dict()) if drone else {}
 
 
 class DarsNearestRssi(DarsEntity, SensorEntity):

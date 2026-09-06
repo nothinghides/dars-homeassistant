@@ -21,6 +21,7 @@ from bleak_retry_connector import (
 
 from homeassistant.components import bluetooth
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import (
@@ -31,6 +32,7 @@ from .const import (
     TICK_S,
 )
 from .decoder import DarsDrone, apply_message, is_licensed, parse_frame
+from .faa_lookup import FaaLookup
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +49,11 @@ class DarsCoordinator:
         # Assume licensed until a successful status read says otherwise, so the
         # integration still works if the (open) read is momentarily blocked.
         self.licensed = True
+
+        # FAA make/model resolver (serial -> declared make/model). Shared HA
+        # session so its cookie jar carries the uasdoc.faa.gov session cookie.
+        self.faa = FaaLookup(async_get_clientsession(hass))
+        self._faa_seen: set[str] = set()
 
         self._client: BleakClientWithServiceCache | None = None
         self._listeners: list[CALLBACK_TYPE] = []
@@ -195,9 +202,21 @@ class DarsCoordinator:
         drone.channel = channel
         drone.last = now
         apply_message(drone, msg)
+        # First time we see a real serial (Basic-ID id_type 1), kick off a
+        # one-shot FAA make/model lookup in the background.
+        serial = drone.uas_id
+        if drone.id_type == 1 and serial and serial not in self._faa_seen:
+            self._faa_seen.add(serial)
+            self.hass.async_create_task(self._async_faa(serial))
         # Surface a brand-new drone immediately; steady-state refreshes ride the
         # 1 s tick so we don't rewrite entity state on every single frame.
         if is_new:
+            self._async_notify()
+
+    async def _async_faa(self, serial: str) -> None:
+        """Resolve a serial's FAA make/model, then refresh entities if found."""
+        info = await self.faa.async_lookup(serial)
+        if info.get("found"):
             self._async_notify()
 
     @callback
@@ -209,6 +228,30 @@ class DarsCoordinator:
         self._async_notify()
 
     # ----- helpers for entities ------------------------------------------- #
+    @callback
+    def _faa_merge(self, drone: DarsDrone, item: dict) -> dict:
+        """Add cached FAA make/model/registration onto a drone's dict view."""
+        info = self.faa.cached(drone.uas_id)
+        if info and info.get("found"):
+            if info.get("make"):
+                item["make"] = info["make"]
+            if info.get("model"):
+                item["model"] = info["model"]
+            if info.get("registration"):
+                item["faa_registration"] = info["registration"]
+        return item
+
+    @callback
+    def drone_payload(self) -> list[dict]:
+        """Full drone list (strongest signal first) for the count sensor's
+        `drones` attribute, each enriched with FAA make/model when known."""
+        drones = sorted(
+            self.drones.values(),
+            key=lambda d: d.rssi if d.rssi is not None else -999,
+            reverse=True,
+        )
+        return [self._faa_merge(d, d.as_dict()) for d in drones]
+
     @callback
     def nearest(self) -> DarsDrone | None:
         """Drone with the strongest signal (RSSI closest to 0) that has a
