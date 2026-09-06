@@ -6,7 +6,7 @@ DOMAIN = "dars_remote_id"
 
 # Bundled Lovelace card that the integration serves + auto-registers on the
 # frontend. Bump when dars-map-card.js changes (used as a cache-busting query).
-CARD_VERSION = "0.6.0"
+CARD_VERSION = "0.6.1"
 CARD_FILENAME = "dars-map-card.js"
 
 # GATT UUIDs — full 128-bit forms of the 16-bit UUIDs the D.A.R.S. firmware exposes.

@@ -19,7 +19,11 @@ jobs:
           category: integration
           # 'brands' is ignored until the home-assistant/brands PR for
           # dars_remote_id is merged; remove this once the icon is live.
-          ignore: brands
+          # 'license' is ignored on purpose: this project ships under the
+          # PolyForm Noncommercial License, which GitHub does not SPDX-detect,
+          # so it is distributed as a HACS *custom* repository (not the default
+          # store, which requires an OSI-recognised licence).
+          ignore: brands license
 
   hassfest:
     name: Hassfest
