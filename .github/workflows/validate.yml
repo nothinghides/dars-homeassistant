@@ -17,8 +17,10 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # 'brands' is ignored until the home-assistant/brands PR for
-          # dars_remote_id is merged; remove this once the icon is live.
+          # 'brands' is ignored on purpose: brand icons are bundled locally in
+          # custom_components/dars_remote_id/brand/ (HA 2026.3.0+ self-hosted
+          # brand images), so this integration is intentionally NOT in the
+          # home-assistant/brands CDN that this check validates against.
           # 'license' is ignored on purpose: this project ships under the
           # PolyForm Noncommercial License, which GitHub does not SPDX-detect,
           # so it is distributed as a HACS *custom* repository (not the default
