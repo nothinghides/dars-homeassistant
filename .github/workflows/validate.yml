@@ -16,12 +16,11 @@ jobs:
       - name: HACS validation
         uses: hacs/action@main
         with:
+          # No ignores: brand images are bundled in
+          # custom_components/dars_remote_id/brand/ (HACS accepts a local brand
+          # directory), and the licence is MIT — so all checks must pass, which
+          # the HACS default store requires.
           category: integration
-          # 'brands' is ignored on purpose: brand icons are bundled locally in
-          # custom_components/dars_remote_id/brand/ (HA 2026.3.0+ self-hosted
-          # brand images), so this integration is intentionally NOT in the
-          # home-assistant/brands CDN that this check validates against.
-          ignore: brands
 
   hassfest:
     name: Hassfest
