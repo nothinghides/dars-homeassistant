@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.5.0';
+const DARS_CARD_VERSION = '0.5.1';
 const LEAFLET_VER = '1.9.4';
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
@@ -36,11 +36,19 @@ const DARS_MAP_ATTR =
   ' contributors · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>' +
   ' · <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a>';
 
+const DARS_UNITS_LS_KEY = 'dars-units';   // 'metric' | 'imperial'
+
 function darsSavedStyle() {
   try { return localStorage.getItem(DARS_STYLE_LS_KEY); } catch (e) { return null; }
 }
 function darsSaveStyle(name) {
   try { localStorage.setItem(DARS_STYLE_LS_KEY, name); } catch (e) { /* private mode */ }
+}
+function darsSavedUnits() {
+  try { return localStorage.getItem(DARS_UNITS_LS_KEY); } catch (e) { return null; }
+}
+function darsSaveUnits(u) {
+  try { localStorage.setItem(DARS_UNITS_LS_KEY, u); } catch (e) { /* private mode */ }
 }
 
 function darsAddCss(href, tag) {
@@ -134,6 +142,7 @@ class DarsMapCard extends HTMLElement {
     this._showReplay = !(config && config.show_replay === false);
     this._config = config || {};
     this._mapStyle = (config && config.map_style) || DARS_MAP_STYLE_DEFAULT;
+    this._units = (config && config.units === 'imperial') ? 'imperial' : 'metric';
   }
 
   getCardSize() { return 9; }
@@ -184,6 +193,10 @@ class DarsMapCard extends HTMLElement {
               border-bottom:1px solid var(--bd); }
         .brand { font-weight:800; letter-spacing:.04em; color:var(--g); font-size:13px; }
         .ttl { font-size:14px; font-weight:700; flex:1; }
+        .unit { background:#141414; color:var(--muted); border:1px solid var(--bd);
+                border-radius:7px; padding:2px 9px; font-size:12px; font-weight:800; cursor:pointer;
+                font-family:'Inter',system-ui,sans-serif; min-width:30px; }
+        .unit:hover { color:var(--g); border-color:var(--g-dim); }
         .badge { font-size:12px; font-weight:800; color:var(--bg2); background:var(--g);
                  border-radius:999px; padding:2px 10px; }
         .badge.zero { background:var(--bd-hi); color:var(--muted); }
@@ -259,6 +272,7 @@ class DarsMapCard extends HTMLElement {
           <div class="hd">
             <span class="brand">D.A.R.S.</span>
             <span class="ttl">${esc(this._title)}</span>
+            <button type="button" class="unit" id="unit" title="Toggle units (metric / imperial)">m</button>
             <span class="badge zero" id="count">0</span>
           </div>
           <div class="warn" id="warn" style="display:none"></div>
@@ -306,11 +320,17 @@ class DarsMapCard extends HTMLElement {
 
     const $ = (id) => this.shadowRoot.getElementById(id);
     this._el = {
-      count: $('count'), warn: $('warn'), map: $('map'), list: $('list'),
+      count: $('count'), warn: $('warn'), map: $('map'), list: $('list'), unit: $('unit'),
       ctrls: $('ctrls'), replayBar: $('replay-bar'),
       modeLive: $('mode-live'), modeReplay: $('mode-replay'),
       win: $('win'), play: $('play'), scrub: $('scrub'), speed: $('speed'), tlabel: $('tlabel'),
     };
+
+    // Units: the viewer's saved choice (localStorage) wins over the card config.
+    const savedUnits = darsSavedUnits();
+    if (savedUnits === 'metric' || savedUnits === 'imperial') this._units = savedUnits;
+    this._el.unit.textContent = this._units === 'imperial' ? 'ft' : 'm';
+    this._el.unit.addEventListener('click', () => this._toggleUnits());
 
     // Replay state.
     this._mode = 'live';
@@ -461,8 +481,8 @@ class DarsMapCard extends HTMLElement {
     this._el.list.innerHTML = drones.map((d) => {
       const id = esc(d.id || d.mac || '—');
       const bits = [];
-      if (d.height_m != null) bits.push(`${d.height_m} m AGL`);
-      if (d.speed_mps != null) bits.push(`${d.speed_mps} m/s`);
+      if (d.height_m != null) bits.push(`Height: ${this._fmtDist(d.height_m)}`);
+      if (d.speed_mps != null) bits.push(this._fmtSpeed(d.speed_mps));
       if (d.heading != null) bits.push(`${d.heading}°`);
       const mm = [d.make, d.model].filter(Boolean).join(' ');
       const modelLine = mm
@@ -554,8 +574,8 @@ class DarsMapCard extends HTMLElement {
       ${line('FAA reg', d.faa_registration)}
       ${line('Source', d.source)}
       ${line('RSSI', d.rssi != null ? d.rssi + ' dBm' : '')}
-      ${line('Height', d.height_m != null ? d.height_m + ' m AGL' : '')}
-      ${line('Speed', d.speed_mps != null ? d.speed_mps + ' m/s' : '')}
+      ${line('Height', d.height_m != null ? this._fmtDist(d.height_m) : '')}
+      ${line('Speed', d.speed_mps != null ? this._fmtSpeed(d.speed_mps) : '')}
       ${line('Heading', d.heading != null ? d.heading + '°' : '')}
       ${tlat != null ? `<div><b>Take-off:</b> ${esc(tlat)}, ${esc(tlon)}</div>` : ''}
     </div>`;
@@ -564,6 +584,29 @@ class DarsMapCard extends HTMLElement {
   _focus(mac) {
     const m = this._markers[mac];
     if (m && this._map) { this._map.setView(m.drone.getLatLng(), 16); m.drone.openPopup(); }
+  }
+
+  // ---- unit formatting (metric default; imperial matches the D.A.R.S. app) - #
+  _fmtDist(m) {
+    if (m == null) return '';
+    return this._units === 'imperial' ? `${Math.round(m * 3.28084)} ft` : `${Math.round(m)} m`;
+  }
+  _fmtSpeed(mps) {
+    if (mps == null) return '';
+    return this._units === 'imperial' ? `${(mps * 2.23694).toFixed(1)} mph` : `${mps} m/s`;
+  }
+
+  _toggleUnits() {
+    this._units = this._units === 'metric' ? 'imperial' : 'metric';
+    darsSaveUnits(this._units);
+    this._el.unit.textContent = this._units === 'imperial' ? 'ft' : 'm';
+    this._refresh();
+  }
+
+  // Re-render the current view (live or replay) after a display-only change.
+  _refresh() {
+    if (this._mode === 'replay') this._renderReplayFrame();
+    else { this._sig = null; this._update(true); }
   }
 
   // ---- replay: read HA Recorder history, scrub + play back --------------- #
@@ -781,6 +824,10 @@ const DARS_EDITOR_SCHEMA = [
     { value: 'Liberty', label: 'Liberty' },
     { value: 'Bright', label: 'Bright' },
   ] } } },
+  { name: 'units', selector: { select: { mode: 'dropdown', options: [
+    { value: 'metric', label: 'Metric (m, m/s)' },
+    { value: 'imperial', label: 'Imperial (ft, mph)' },
+  ] } } },
   { name: 'show_takeoff', selector: { boolean: {} } },
   { name: 'show_replay', selector: { boolean: {} } },
 ];
@@ -788,6 +835,7 @@ const DARS_EDITOR_LABELS = {
   entity: 'Drones entity',
   title: 'Card title',
   map_style: 'Map style',
+  units: 'Units (viewers can also toggle on the card)',
   show_takeoff: 'Show take-off location',
   show_replay: 'Show Live/Replay controls',
 };

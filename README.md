@@ -71,9 +71,14 @@ type: custom:dars-map-card
 entity: sensor.dars_active_drones   # optional (auto-detected if omitted)
 title: Drone Map                    # optional
 map_style: Fiord                    # optional: Fiord | Dark Matter | Positron | Liberty | Bright
+units: metric                       # optional: metric (m, m/s) | imperial (ft, mph)
 show_takeoff: true                  # optional
 show_replay: true                   # optional: show the Live/Replay controls
 ```
+
+**Units.** `units` sets the default; each viewer can also flip metric ⇄ imperial
+with the **m / ft** button in the card header (their choice is remembered on that
+device). Matches the D.A.R.S. app (m→ft, m/s→mph).
 
 **Map styles** use free‑for‑commercial [OpenFreeMap](https://openfreemap.org)
 vector tiles (same styles as the D.A.R.S. app). The on‑map switcher remembers the
