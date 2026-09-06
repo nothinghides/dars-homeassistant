@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.5.1';
+const DARS_CARD_VERSION = '0.5.2';
 const LEAFLET_VER = '1.9.4';
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
@@ -136,7 +136,10 @@ function takeoffIconHtml(color) {
 class DarsMapCard extends HTMLElement {
   setConfig(config) {
     this._entity = (config && config.entity) || 'sensor.dars_active_drones';
-    this._title = (config && config.title) || 'D.A.R.S. — Drone Map';
+    // The header already shows a "D.A.R.S." brand chip, so strip a redundant
+    // leading "D.A.R.S." (with optional dash) from the title to avoid doubling.
+    this._title = (((config && config.title) || 'Drone Map')
+      .replace(/^\s*D\.?A\.?R\.?S\.?\s*[—–-]?\s*/i, '').trim()) || 'Drone Map';
     // Accept the old `show_operator` key too, for configs saved before the rename.
     this._showTakeoff = !(config && (config.show_takeoff === false || config.show_operator === false));
     this._showReplay = !(config && config.show_replay === false);
@@ -150,7 +153,7 @@ class DarsMapCard extends HTMLElement {
   // Visual editor hooks (HA card UI).
   static getConfigElement() { return document.createElement('dars-map-card-editor'); }
   static getStubConfig() {
-    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_takeoff: true, map_style: DARS_MAP_STYLE_DEFAULT };
+    return { entity: 'sensor.dars_active_drones', title: 'Drone Map', show_takeoff: true, map_style: DARS_MAP_STYLE_DEFAULT };
   }
 
   set hass(hass) {
