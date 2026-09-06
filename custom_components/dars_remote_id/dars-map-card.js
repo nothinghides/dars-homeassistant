@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.4.0';
+const DARS_CARD_VERSION = '0.5.0';
 const LEAFLET_VER = '1.9.4';
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
@@ -131,6 +131,7 @@ class DarsMapCard extends HTMLElement {
     this._title = (config && config.title) || 'D.A.R.S. — Drone Map';
     // Accept the old `show_operator` key too, for configs saved before the rename.
     this._showTakeoff = !(config && (config.show_takeoff === false || config.show_operator === false));
+    this._showReplay = !(config && config.show_replay === false);
     this._config = config || {};
     this._mapStyle = (config && config.map_style) || DARS_MAP_STYLE_DEFAULT;
   }
@@ -173,6 +174,7 @@ class DarsMapCard extends HTMLElement {
       <style>
         :host { --g:#00FF41; --g-dim:#00cc33; --bg:#0d0d0d; --bg2:#020101;
                 --bd:#2a2a2a; --bd-hi:#3a3a3a; --muted:#8a8a8a; --white:#fff; }
+        [hidden] { display:none !important; }
         ha-card, .card { background:var(--bg); border:1px solid var(--bd);
                 border-radius:12px; overflow:hidden; position:relative;
                 font-family:'Inter','Segoe UI',system-ui,sans-serif; color:var(--white); }
@@ -225,6 +227,21 @@ class DarsMapCard extends HTMLElement {
         .leaflet-control-attribution { background:rgba(13,13,13,.82) !important; color:#9a9a9a;
                 font-size:10px; }
         .leaflet-control-attribution a { color:#00cc33; }
+        /* Live / Replay controls */
+        .ctrls { border-bottom:1px solid var(--bd); background:#0b0b0b; }
+        .modes { display:flex; gap:6px; padding:8px 12px; }
+        .modes button { flex:0 0 auto; background:#141414; color:var(--muted); border:1px solid var(--bd);
+                border-radius:8px; padding:5px 12px; font-size:12px; font-weight:700; cursor:pointer;
+                font-family:'Inter',system-ui,sans-serif; letter-spacing:.02em; }
+        .modes button.on { background:var(--g); color:var(--bg2); border-color:var(--g); }
+        .replay-bar { display:flex; align-items:center; gap:8px; padding:0 12px 10px; flex-wrap:wrap; }
+        .replay-bar select, .replay-bar button { background:#141414; color:#ddd; border:1px solid var(--bd);
+                border-radius:8px; padding:5px 8px; font-size:12px; font-weight:600; cursor:pointer;
+                font-family:'Inter',system-ui,sans-serif; outline:none; }
+        .replay-bar #play { min-width:34px; color:var(--g); }
+        .replay-bar #scrub { flex:1 1 120px; min-width:100px; accent-color:var(--g); cursor:pointer; }
+        .replay-bar .tlabel { font-size:11px; color:var(--muted); font-family:'JetBrains Mono','Consolas',monospace;
+                flex:1 1 100%; text-align:right; }
         /* Attributions & licenses footer */
         .attrib { border-top:1px solid var(--bd); font-size:11px; color:var(--muted); }
         .attrib > summary { list-style:none; cursor:pointer; padding:9px 16px; user-select:none;
@@ -246,6 +263,28 @@ class DarsMapCard extends HTMLElement {
           </div>
           <div class="warn" id="warn" style="display:none"></div>
           <div id="map"></div>
+          <div class="ctrls" id="ctrls" hidden>
+            <div class="modes">
+              <button type="button" data-mode="live" class="on" id="mode-live">● Live</button>
+              <button type="button" data-mode="replay" id="mode-replay">⟲ Replay</button>
+            </div>
+            <div class="replay-bar" id="replay-bar" hidden>
+              <select id="win" title="Time window">
+                <option value="1">Last 1 hour</option>
+                <option value="6">Last 6 hours</option>
+                <option value="24">Last 24 hours</option>
+              </select>
+              <button type="button" id="play" title="Play/pause">▶</button>
+              <input type="range" id="scrub" min="0" max="1000" value="1000" step="1" />
+              <select id="speed" title="Playback speed">
+                <option value="1">1×</option>
+                <option value="4" selected>4×</option>
+                <option value="16">16×</option>
+                <option value="60">60×</option>
+              </select>
+              <span class="tlabel" id="tlabel">—</span>
+            </div>
+          </div>
           <div class="list" id="list"></div>
           <details class="attrib">
             <summary>Attributions &amp; licenses</summary>
@@ -265,12 +304,35 @@ class DarsMapCard extends HTMLElement {
         </div>
       </ha-card>`;
 
+    const $ = (id) => this.shadowRoot.getElementById(id);
     this._el = {
-      count: this.shadowRoot.getElementById('count'),
-      warn: this.shadowRoot.getElementById('warn'),
-      map: this.shadowRoot.getElementById('map'),
-      list: this.shadowRoot.getElementById('list'),
+      count: $('count'), warn: $('warn'), map: $('map'), list: $('list'),
+      ctrls: $('ctrls'), replayBar: $('replay-bar'),
+      modeLive: $('mode-live'), modeReplay: $('mode-replay'),
+      win: $('win'), play: $('play'), scrub: $('scrub'), speed: $('speed'), tlabel: $('tlabel'),
     };
+
+    // Replay state.
+    this._mode = 'live';
+    this._replay = null;
+
+    // Wire the Live/Replay controls.
+    if (this._showReplay) {
+      this._el.ctrls.hidden = false;
+      this._el.modeLive.addEventListener('click', () => this._setMode('live'));
+      this._el.modeReplay.addEventListener('click', () => this._setMode('replay'));
+      this._el.win.addEventListener('change', () => this._loadHistory());
+      this._el.speed.addEventListener('change', () => {
+        if (this._replay) this._replay.speed = Number(this._el.speed.value);
+      });
+      this._el.play.addEventListener('click', () => this._togglePlay());
+      this._el.scrub.addEventListener('input', () => {
+        if (!this._replay) return;
+        this._pauseReplay();
+        this._replay.tCur = Number(this._el.scrub.value);
+        this._renderReplayFrame();
+      });
+    }
 
     darsLoadMapLibs()
       .then((L) => this._initMap(L))
@@ -365,6 +427,7 @@ class DarsMapCard extends HTMLElement {
   // ---- per-update: markers + list ---------------------------------------
   _update(force) {
     if (!this._hass || !this._el) return;
+    if (this._mode === 'replay') return;   // replay drives its own rendering
     const eid = this._resolveEntity();
     const st = this._hass.states[eid];
     if (!st) {
@@ -381,37 +444,40 @@ class DarsMapCard extends HTMLElement {
     if (!force && sig === this._sig) return;
     this._sig = sig;
 
-    // Count badge.
+    this._renderCountAndList(drones);
+    if (this._map) this._syncMarkers(drones);
+  }
+
+  // Shared by live + replay: count badge + detection list for a drone snapshot.
+  _renderCountAndList(drones) {
     this._el.count.textContent = drones.length;
     this._el.count.classList.toggle('zero', drones.length === 0);
 
-    // Detection list.
     if (!drones.length) {
-      this._el.list.innerHTML = `<div class="empty">No drones detected.</div>`;
-    } else {
-      this._el.list.innerHTML = drones.map((d) => {
-        const id = esc(d.id || d.mac || '—');
-        const bits = [];
-        if (d.height_m != null) bits.push(`${d.height_m} m AGL`);
-        if (d.speed_mps != null) bits.push(`${d.speed_mps} m/s`);
-        if (d.heading != null) bits.push(`${d.heading}°`);
-        const mm = [d.make, d.model].filter(Boolean).join(' ');
-        const modelLine = mm
-          ? `<div class="meta">${esc(mm)}${d.faa_registration ? ' · ' + esc(d.faa_registration) : ''}</div>`
-          : '';
-        return `<div class="row" data-mac="${esc(d.mac)}">
-            <div class="id" style="color:${this._colorFor(d.mac)}">${id}</div>
-            <div class="rssi">${d.rssi != null ? d.rssi + ' dBm' : ''}</div>
-            <div class="meta"><span class="tag">${esc(d.source || '')}</span> ${esc(bits.join(' · '))}</div>
-            ${modelLine}
-          </div>`;
-      }).join('');
-      this._el.list.querySelectorAll('.row').forEach((row) => {
-        row.addEventListener('click', () => this._focus(row.getAttribute('data-mac')));
-      });
+      this._el.list.innerHTML = `<div class="empty">${
+        this._mode === 'replay' ? 'No drones at this moment.' : 'No drones detected.'}</div>`;
+      return;
     }
-
-    if (this._map) this._syncMarkers(drones);
+    this._el.list.innerHTML = drones.map((d) => {
+      const id = esc(d.id || d.mac || '—');
+      const bits = [];
+      if (d.height_m != null) bits.push(`${d.height_m} m AGL`);
+      if (d.speed_mps != null) bits.push(`${d.speed_mps} m/s`);
+      if (d.heading != null) bits.push(`${d.heading}°`);
+      const mm = [d.make, d.model].filter(Boolean).join(' ');
+      const modelLine = mm
+        ? `<div class="meta">${esc(mm)}${d.faa_registration ? ' · ' + esc(d.faa_registration) : ''}</div>`
+        : '';
+      return `<div class="row" data-mac="${esc(d.mac)}">
+          <div class="id" style="color:${this._colorFor(d.mac)}">${id}</div>
+          <div class="rssi">${d.rssi != null ? d.rssi + ' dBm' : ''}</div>
+          <div class="meta"><span class="tag">${esc(d.source || '')}</span> ${esc(bits.join(' · '))}</div>
+          ${modelLine}
+        </div>`;
+    }).join('');
+    this._el.list.querySelectorAll('.row').forEach((row) => {
+      row.addEventListener('click', () => this._focus(row.getAttribute('data-mac')));
+    });
   }
 
   _syncMarkers(drones) {
@@ -499,6 +565,203 @@ class DarsMapCard extends HTMLElement {
     const m = this._markers[mac];
     if (m && this._map) { this._map.setView(m.drone.getLatLng(), 16); m.drone.openPopup(); }
   }
+
+  // ---- replay: read HA Recorder history, scrub + play back --------------- #
+  _setMode(mode) {
+    if (mode === this._mode) return;
+    this._mode = mode;
+    this._el.modeLive.classList.toggle('on', mode === 'live');
+    this._el.modeReplay.classList.toggle('on', mode === 'replay');
+    this._el.replayBar.hidden = mode !== 'replay';
+    if (mode === 'replay') {
+      this._clearMarkers();
+      this._loadHistory();
+    } else {
+      this._pauseReplay();
+      this._clearPaths();
+      this._clearMarkers();
+      this._replay = null;
+      this._fitted = true;          // don't refit when live resumes
+      this._sig = null;
+      this._update(true);           // resume live rendering
+    }
+  }
+
+  // Pull the drones sensor's state history for the chosen window and rebuild
+  // per-drone tracks. Uses HA's own Recorder (no extra storage on our side).
+  async _loadHistory() {
+    if (this._mode !== 'replay') return;
+    this._pauseReplay();
+    this._clearPaths();
+    this._clearMarkers();
+    const eid = this._resolveEntity();
+    const hours = Number(this._el.win.value) || 1;
+    const end = new Date();
+    const start = new Date(end.getTime() - hours * 3600 * 1000);
+    this._warn('Loading history…');
+    this._el.tlabel.textContent = 'loading…';
+    let res;
+    try {
+      res = await this._hass.callWS({
+        type: 'history/history_during_period',
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        entity_ids: [eid],
+        minimal_response: false,
+        no_attributes: false,
+        significant_changes_only: false,
+      });
+    } catch (e) {
+      this._warn('History unavailable (' + (e && e.message ? e.message : e) + ').');
+      return;
+    }
+    const arr = (res && res[eid]) || [];
+    const tracks = {};
+    let tMin = Infinity, tMax = -Infinity;
+    let lastAttrs = {};
+    for (const item of arr) {
+      // Compressed WS format: lu=last_updated(s), a=attributes (omitted if unchanged).
+      const t = item.lu != null ? item.lu * 1000
+        : (item.last_updated ? Date.parse(item.last_updated) : null);
+      if (t == null) continue;
+      const a = item.a || item.attributes || lastAttrs;
+      lastAttrs = a;
+      const drones = Array.isArray(a.drones) ? a.drones : [];
+      for (const d of drones) {
+        if (d.lat == null || d.lon == null) continue;
+        const key = d.id || d.mac;
+        if (!key) continue;
+        (tracks[key] || (tracks[key] = { key, mac: d.mac || key, samples: [] }))
+          .samples.push(Object.assign({ t }, d));
+        if (t < tMin) tMin = t;
+        if (t > tMax) tMax = t;
+      }
+    }
+    if (!Object.keys(tracks).length) {
+      this._warn(`No positional drone history in the last ${hours} h (Recorder retention / no flights).`);
+      this._el.tlabel.textContent = '—';
+      this._el.scrub.disabled = true;
+      return;
+    }
+    for (const k in tracks) tracks[k].samples.sort((a, b) => a.t - b.t);
+    this._warn(this._mapWarn || '');
+    this._replay = { tracks, tMin, tMax, tCur: tMax, playing: false,
+      speed: Number(this._el.speed.value) || 4 };
+    this._el.scrub.disabled = false;
+    this._el.scrub.min = String(tMin);
+    this._el.scrub.max = String(tMax);
+    this._el.scrub.step = '1000';
+    this._el.scrub.value = String(tMax);
+
+    // Fit once to the whole session, then render the final frame paused.
+    if (this._map) {
+      const pts = [];
+      for (const k in tracks) for (const s of tracks[k].samples) pts.push([s.lat, s.lon]);
+      if (this._home) pts.push([this._home.getLatLng().lat, this._home.getLatLng().lng]);
+      if (pts.length) this._map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+      this._fitted = true;   // keep the session fit; stop per-frame auto-fit
+    }
+    this._renderReplayFrame();
+  }
+
+  // Interpolated snapshot of every track at time t (drone dicts like live).
+  _dronesAt(t) {
+    const out = [];
+    const tr = this._replay.tracks;
+    for (const key in tr) {
+      const s = tr[key].samples;
+      let lo = 0, hi = s.length - 1, idx = -1;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (s[m].t <= t) { idx = m; lo = m + 1; } else hi = m - 1; }
+      if (idx < 0) continue;                 // drone not seen yet at this instant
+      const cur = s[idx], nxt = s[idx + 1];
+      const d = Object.assign({}, cur);
+      if (nxt && nxt.t > cur.t) {
+        const f = Math.max(0, Math.min(1, (t - cur.t) / (nxt.t - cur.t)));
+        d.lat = cur.lat + (nxt.lat - cur.lat) * f;
+        d.lon = cur.lon + (nxt.lon - cur.lon) * f;
+      }
+      out.push(d);
+    }
+    return out;
+  }
+
+  _renderReplayFrame() {
+    if (!this._replay) return;
+    const t = this._replay.tCur;
+    const drones = this._dronesAt(t);
+    this._renderCountAndList(drones);
+    if (this._map) { this._syncMarkers(drones); this._renderPaths(t); }
+    if (this._el.scrub.value !== String(Math.round(t))) this._el.scrub.value = String(Math.round(t));
+    this._el.tlabel.textContent = new Date(t).toLocaleString();
+  }
+
+  // Breadcrumb trail: each track's path from window start up to t.
+  _renderPaths(t) {
+    const L = this._L;
+    if (!this._replayPaths) this._replayPaths = {};
+    const tr = this._replay.tracks;
+    for (const key in tr) {
+      const pts = [];
+      for (const s of tr[key].samples) { if (s.t > t) break; pts.push([s.lat, s.lon]); }
+      const color = this._colorFor(tr[key].mac);
+      let p = this._replayPaths[key];
+      if (pts.length < 2) { if (p) { this._map.removeLayer(p); this._replayPaths[key] = null; } continue; }
+      if (!p) {
+        this._replayPaths[key] = L.polyline(pts, { color, weight: 2, opacity: 0.5 }).addTo(this._map);
+      } else {
+        p.setLatLngs(pts); p.setStyle({ color });
+      }
+    }
+  }
+
+  _togglePlay() {
+    if (!this._replay) return;
+    if (this._replay.playing) { this._pauseReplay(); return; }
+    if (this._replay.tCur >= this._replay.tMax) this._replay.tCur = this._replay.tMin; // restart
+    this._replay.playing = true;
+    this._replay.lastFrame = performance.now();
+    this._el.play.textContent = '❚❚';
+    // setInterval (not requestAnimationFrame): rAF is paused/throttled in
+    // backgrounded tabs and some webviews (incl. the HA companion app). We
+    // advance by the real elapsed time so playback speed stays accurate.
+    this._playTimer = setInterval(() => {
+      if (!this._replay || !this._replay.playing) return;
+      const now = performance.now();
+      const dt = now - this._replay.lastFrame;
+      this._replay.lastFrame = now;
+      this._replay.tCur += dt * this._replay.speed;
+      if (this._replay.tCur >= this._replay.tMax) {
+        this._replay.tCur = this._replay.tMax;
+        this._renderReplayFrame();
+        this._pauseReplay();
+        return;
+      }
+      this._renderReplayFrame();
+    }, 66);
+  }
+
+  _pauseReplay() {
+    if (this._playTimer) { clearInterval(this._playTimer); this._playTimer = null; }
+    if (this._replay) this._replay.playing = false;
+    if (this._el && this._el.play) this._el.play.textContent = '▶';
+  }
+
+  _clearPaths() {
+    if (!this._replayPaths) return;
+    for (const k in this._replayPaths) { const p = this._replayPaths[k]; if (p && this._map) this._map.removeLayer(p); }
+    this._replayPaths = {};
+  }
+
+  _clearMarkers() {
+    if (!this._markers || !this._map) { this._markers = {}; return; }
+    for (const mac in this._markers) {
+      const m = this._markers[mac];
+      [m.drone, m.takeoff, m.line].forEach((l) => l && this._map.removeLayer(l));
+    }
+    this._markers = {};
+  }
+
+  disconnectedCallback() { this._pauseReplay(); }
 }
 
 // Guarded so the module is safe to load twice (e.g. the integration's auto-load
@@ -519,12 +782,14 @@ const DARS_EDITOR_SCHEMA = [
     { value: 'Bright', label: 'Bright' },
   ] } } },
   { name: 'show_takeoff', selector: { boolean: {} } },
+  { name: 'show_replay', selector: { boolean: {} } },
 ];
 const DARS_EDITOR_LABELS = {
   entity: 'Drones entity',
   title: 'Card title',
   map_style: 'Map style',
   show_takeoff: 'Show take-off location',
+  show_replay: 'Show Live/Replay controls',
 };
 
 class DarsMapCardEditor extends HTMLElement {

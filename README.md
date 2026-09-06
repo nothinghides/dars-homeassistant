@@ -68,9 +68,25 @@ and Home Assistant is restarted, just add it to a dashboard:
 
 ```yaml
 type: custom:dars-map-card
-entity: sensor.dars_active_drones   # optional (this is the default)
+entity: sensor.dars_active_drones   # optional (auto-detected if omitted)
 title: Drone Map                    # optional
+map_style: Fiord                    # optional: Fiord | Dark Matter | Positron | Liberty | Bright
+show_takeoff: true                  # optional
+show_replay: true                   # optional: show the Live/Replay controls
 ```
+
+**Map styles** use free‑for‑commercial [OpenFreeMap](https://openfreemap.org)
+vector tiles (same styles as the D.A.R.S. app). The on‑map switcher remembers the
+viewer's choice. See `ATTRIBUTIONS.md` for data/library licences.
+
+**Live / Replay.** The card has a **Live** and a **Replay** mode. Replay reads
+this receiver's history straight from Home Assistant's **Recorder** (no extra
+storage) for the last 1/6/24 h and gives you a **timeline scrubber, play/pause and
+speed** to watch past flights animate — breadcrumb trails included. Replay depends
+on Recorder retention (default ~10 days) and needs the drones sensor to be
+recorded; a single history sample whose attributes exceed 16 KiB (≈ 60+
+simultaneous drones) is dropped by HA. Set `show_replay: false` to hide the
+controls.
 
 The integration serves the card at `/dars_remote_id/dars-map-card.js` and
 registers it as a frontend module automatically — no `www/` copy, no Lovelace
