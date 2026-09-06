@@ -86,12 +86,12 @@ viewer's choice. See `ATTRIBUTIONS.md` for data/library licences.
 
 **Live / Replay.** The card has a **Live** and a **Replay** mode. Replay reads
 this receiver's history straight from Home Assistant's **Recorder** (no extra
-storage) for the last 1/6/24 h and gives you a **timeline scrubber, play/pause and
-speed** to watch past flights animate — breadcrumb trails included. Replay depends
-on Recorder retention (default ~10 days) and needs the drones sensor to be
-recorded; a single history sample whose attributes exceed 16 KiB (≈ 60+
-simultaneous drones) is dropped by HA. Set `show_replay: false` to hide the
-controls.
+storage): pick a **day** (Today, Yesterday, or a specific date) and use the
+**timeline scrubber, play/pause and speed** to watch that day's flights animate —
+breadcrumb trails included. Replay depends on Recorder retention (default
+~10 days) and needs the drones sensor to be recorded; a single history sample
+whose attributes exceed 16 KiB (≈ 60+ simultaneous drones) is dropped by HA. Set
+`show_replay: false` to hide the controls.
 
 The integration serves the card at `/dars_remote_id/dars-map-card.js` and
 registers it as a frontend module automatically — no `www/` copy, no Lovelace
@@ -205,6 +205,16 @@ flash a light or announce on a speaker.
 
 `decoder.py` is Home Assistant independent and unit‑testable in isolation. The
 byte layout and ODID math match the firmware and the web viewer exactly.
+
+## License & attributions
+
+Licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)** — free to
+use for personal, hobby, educational, non‑profit, and other non‑commercial
+purposes; commercial use requires a separate licence from D.A.R.S.
+(© getdars.com). Third‑party map data and libraries remain under their own
+licences — see **[ATTRIBUTIONS.md](ATTRIBUTIONS.md)** (OpenStreetMap / OpenFreeMap
+/ OpenMapTiles, Leaflet, MapLibre GL JS, maplibre‑gl‑leaflet, and the FAA UAS
+Declaration of Compliance data).
 
 ---
 

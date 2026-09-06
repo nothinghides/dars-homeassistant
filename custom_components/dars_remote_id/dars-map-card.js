@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.5.3';
+const DARS_CARD_VERSION = '0.6.0';
 const LEAFLET_VER = '1.9.4';
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
@@ -286,11 +286,7 @@ class DarsMapCard extends HTMLElement {
               <button type="button" data-mode="replay" id="mode-replay">⟲ Replay</button>
             </div>
             <div class="replay-bar" id="replay-bar" hidden>
-              <select id="win" title="Time window">
-                <option value="1">Last 1 hour</option>
-                <option value="6">Last 6 hours</option>
-                <option value="24">Last 24 hours</option>
-              </select>
+              <select id="win" title="Day to replay"></select>
               <button type="button" id="play" title="Play/pause">▶</button>
               <input type="range" id="scrub" min="0" max="1000" value="1000" step="1" />
               <select id="speed" title="Playback speed">
@@ -342,6 +338,7 @@ class DarsMapCard extends HTMLElement {
     // Wire the Live/Replay controls.
     if (this._showReplay) {
       this._el.ctrls.hidden = false;
+      this._populateDayOptions();
       this._el.modeLive.addEventListener('click', () => this._setMode('live'));
       this._el.modeReplay.addEventListener('click', () => this._setMode('replay'));
       this._el.win.addEventListener('change', () => this._loadHistory());
@@ -613,6 +610,26 @@ class DarsMapCard extends HTMLElement {
   }
 
   // ---- replay: read HA Recorder history, scrub + play back --------------- #
+  // Fill the day picker with recent calendar days (Today, Yesterday, then dated),
+  // matching the D.A.R.S. app's day-grouped history. Value = that day's local
+  // midnight (ms). Covers a bit more than the usual Recorder retention.
+  _populateDayOptions() {
+    const sel = this._el.win;
+    if (!sel) return;
+    const DAYS = 14;
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    sel.innerHTML = '';
+    for (let i = 0; i < DAYS; i++) {
+      const d = new Date(midnight.getTime() - i * 86400000);
+      const opt = document.createElement('option');
+      opt.value = String(d.getTime());
+      opt.textContent = i === 0 ? 'Today' : i === 1 ? 'Yesterday'
+        : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+      sel.appendChild(opt);
+    }
+  }
+
   _setMode(mode) {
     if (mode === this._mode) return;
     this._mode = mode;
@@ -620,6 +637,7 @@ class DarsMapCard extends HTMLElement {
     this._el.modeReplay.classList.toggle('on', mode === 'replay');
     this._el.replayBar.hidden = mode !== 'replay';
     if (mode === 'replay') {
+      this._populateDayOptions();   // refresh so "Today" is current
       this._clearMarkers();
       this._loadHistory();
     } else {
@@ -641,9 +659,14 @@ class DarsMapCard extends HTMLElement {
     this._clearPaths();
     this._clearMarkers();
     const eid = this._resolveEntity();
-    const hours = Number(this._el.win.value) || 1;
-    const end = new Date();
-    const start = new Date(end.getTime() - hours * 3600 * 1000);
+    // Selected calendar day: local midnight → next midnight, clamped to now.
+    const now = new Date();
+    const dayStart = Number(this._el.win.value)
+      || new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const start = new Date(dayStart);
+    const dayEnd = new Date(dayStart + 86400000);
+    const end = dayEnd > now ? now : dayEnd;
+    const dayLabel = this._el.win.selectedOptions[0] ? this._el.win.selectedOptions[0].textContent : 'that day';
     this._warn('Loading history…');
     this._el.tlabel.textContent = 'loading…';
     let res;
@@ -684,7 +707,7 @@ class DarsMapCard extends HTMLElement {
       }
     }
     if (!Object.keys(tracks).length) {
-      this._warn(`No positional drone history in the last ${hours} h (Recorder retention / no flights).`);
+      this._warn(`No drone positions recorded for ${dayLabel} (Recorder retention / no flights).`);
       this._el.tlabel.textContent = '—';
       this._el.scrub.disabled = true;
       return;
