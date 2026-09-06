@@ -21,11 +21,7 @@ jobs:
           # custom_components/dars_remote_id/brand/ (HA 2026.3.0+ self-hosted
           # brand images), so this integration is intentionally NOT in the
           # home-assistant/brands CDN that this check validates against.
-          # 'license' is ignored on purpose: this project ships under the
-          # PolyForm Noncommercial License, which GitHub does not SPDX-detect,
-          # so it is distributed as a HACS *custom* repository (not the default
-          # store, which requires an OSI-recognised licence).
-          ignore: brands license
+          ignore: brands
 
   hassfest:
     name: Hassfest

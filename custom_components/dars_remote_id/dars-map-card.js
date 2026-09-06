@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.6.3';
+const DARS_CARD_VERSION = '0.7.0';
 const LEAFLET_VER = '1.9.4';
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
@@ -685,23 +685,43 @@ class DarsMapCard extends HTMLElement {
       return;
     }
     const arr = (res && res[eid]) || [];
-    const tracks = {};
-    let tMin = Infinity, tMax = -Infinity;
+    // Decode the compressed history into [{t, drones}] rows (attributes carry
+    // forward when the WS omits an unchanged `a`).
+    const rows = [];
     let lastAttrs = {};
     for (const item of arr) {
-      // Compressed WS format: lu=last_updated(s), a=attributes (omitted if unchanged).
       const t = item.lu != null ? item.lu * 1000
         : (item.last_updated ? Date.parse(item.last_updated) : null);
       if (t == null) continue;
       const a = item.a || item.attributes || lastAttrs;
       lastAttrs = a;
-      const drones = Array.isArray(a.drones) ? a.drones : [];
-      for (const d of drones) {
+      rows.push({ t, drones: Array.isArray(a.drones) ? a.drones : [] });
+    }
+    // Map each MAC to the serial (uasId) it ever reported. A drone seen before
+    // its Basic-ID arrives is shown by MAC; once the serial is known, later
+    // samples carry it. Without this, those two phases become two tracks (the
+    // "same drone twice" bug). Keying every sample by the MAC's canonical serial
+    // (when known) merges them into one continuous track — and also stitches a
+    // drone across BLE MAC rotation, since the serial is the stable identity.
+    const macToSerial = {};
+    for (const row of rows) {
+      for (const d of row.drones) {
+        if (d.mac && d.id && d.id !== d.mac) macToSerial[d.mac] = d.id;
+      }
+    }
+    const keyOf = (d) => macToSerial[d.mac] || d.id || d.mac;
+
+    const tracks = {};
+    let tMin = Infinity, tMax = -Infinity;
+    for (const row of rows) {
+      const t = row.t;
+      for (const d of row.drones) {
         if (d.lat == null || d.lon == null) continue;
-        const key = d.id || d.mac;
+        const key = keyOf(d);
         if (!key) continue;
-        (tracks[key] || (tracks[key] = { key, mac: d.mac || key, samples: [] }))
-          .samples.push(Object.assign({ t }, d));
+        // Canonical identity for stable markers/colour across a merged track.
+        const sample = Object.assign({ t }, d, { mac: key, id: d.id || macToSerial[d.mac] || null });
+        (tracks[key] || (tracks[key] = { key, mac: key, samples: [] })).samples.push(sample);
         if (t < tMin) tMin = t;
         if (t > tMax) tMax = t;
       }

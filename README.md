@@ -208,13 +208,11 @@ byte layout and ODID math match the firmware and the web viewer exactly.
 
 ## License & attributions
 
-Licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)** — free to
-use for personal, hobby, educational, non‑profit, and other non‑commercial
-purposes; commercial use requires a separate licence from D.A.R.S.
-(© getdars.com). Third‑party map data and libraries remain under their own
-licences — see **[ATTRIBUTIONS.md](ATTRIBUTIONS.md)** (OpenStreetMap / OpenFreeMap
-/ OpenMapTiles, Leaflet, MapLibre GL JS, maplibre‑gl‑leaflet, and the FAA UAS
-Declaration of Compliance data).
+Licensed under the **[MIT License](LICENSE)** (© getdars.com). Third‑party map
+data and libraries remain under their own licences — see
+**[ATTRIBUTIONS.md](ATTRIBUTIONS.md)** (OpenStreetMap / OpenFreeMap / OpenMapTiles,
+Leaflet, MapLibre GL JS, maplibre‑gl‑leaflet, and the FAA UAS Declaration of
+Compliance data).
 
 ---
 
