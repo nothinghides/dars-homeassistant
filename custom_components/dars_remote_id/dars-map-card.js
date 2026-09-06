@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.3.2';
+const DARS_CARD_VERSION = '0.3.3';
 const LEAFLET_VER = '1.9.4';
 
 // Load Leaflet once (from CDN, pinned). Needs internet on the *viewing* browser;
@@ -77,6 +77,7 @@ class DarsMapCard extends HTMLElement {
     // Accept the old `show_operator` key too, for configs saved before the rename.
     this._showTakeoff = !(config && (config.show_takeoff === false || config.show_operator === false));
     this._config = config || {};
+    this._mapStyle = (config && config.map_style) || 'Streets';
   }
 
   getCardSize() { return 9; }
@@ -84,7 +85,7 @@ class DarsMapCard extends HTMLElement {
   // Visual editor hooks (HA card UI).
   static getConfigElement() { return document.createElement('dars-map-card-editor'); }
   static getStubConfig() {
-    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_takeoff: true };
+    return { entity: 'sensor.dars_active_drones', title: 'D.A.R.S. — Drone Map', show_takeoff: true, map_style: 'Streets' };
   }
 
   set hass(hass) {
@@ -156,6 +157,14 @@ class DarsMapCard extends HTMLElement {
         .leaflet-popup-content { font-family:'Inter',system-ui,sans-serif; color:#cfcfcf; }
         .leaflet-popup-content b { color:#fff; }
         .leaflet-container a.leaflet-popup-close-button { color:#888; }
+        /* Dark map-style switcher to match the theme */
+        .leaflet-control-layers { background:#0d0d0d; color:#ddd; border:1px solid var(--bd);
+                border-radius:8px; }
+        .leaflet-control-layers-expanded { padding:8px 10px; }
+        .leaflet-control-layers label { font-family:'Inter',system-ui,sans-serif; font-size:13px; }
+        .leaflet-control-layers-selector { accent-color:var(--g); }
+        .leaflet-bar a { background:#0d0d0d; color:#ddd; border-bottom:1px solid var(--bd); }
+        .leaflet-bar a:hover { background:#1a1a1a; }
       </style>
       <ha-card>
         <div class="card">
@@ -203,8 +212,20 @@ class DarsMapCard extends HTMLElement {
     this._L = L;
     this._map = L.map(this._el.map, { attributionControl: false, zoomControl: true })
       .setView([this._hass.config.latitude || 0, this._hass.config.longitude || 0], 13);
-    L.tileLayer(`https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`, { maxZoom: 19 })
-      .addTo(this._map);
+
+    // Selectable base layers (all free, no key). Needs internet on the viewer.
+    const bases = {
+      'Streets': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }),
+      'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        { maxZoom: 20, subdomains: 'abcd' }),
+      'Satellite': L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19 }),
+    };
+    const startName = bases[this._mapStyle] ? this._mapStyle : 'Streets';
+    bases[startName].addTo(this._map);
+    L.control.layers(bases, null, { position: 'topright' }).addTo(this._map);
+    this._map.on('baselayerchange', (e) => { this._mapStyle = e.name; });
     // Home / receiver location marker.
     if (this._hass.config.latitude != null) {
       this._home = L.marker([this._hass.config.latitude, this._hass.config.longitude], {
@@ -232,8 +253,10 @@ class DarsMapCard extends HTMLElement {
     this._warn(this._mapWarn || '');   // clear the not-found notice once resolved
     const drones = Array.isArray(st.attributes.drones) ? st.attributes.drones : [];
 
-    // Skip redundant re-renders (hass fires on every state change).
-    const sig = eid + '|' + st.last_changed + '|' + drones.length;
+    // Skip redundant re-renders (hass fires on every state change). Key off
+    // last_updated (not last_changed) so a drone *moving* — an attribute change
+    // that leaves the count/state string the same — still re-renders live.
+    const sig = eid + '|' + st.last_updated + '|' + drones.length;
     if (!force && sig === this._sig) return;
     this._sig = sig;
 
@@ -248,7 +271,7 @@ class DarsMapCard extends HTMLElement {
       this._el.list.innerHTML = drones.map((d) => {
         const id = esc(d.id || d.mac || '—');
         const bits = [];
-        if (d.altitude_m != null) bits.push(`${d.altitude_m} m`);
+        if (d.height_m != null) bits.push(`${d.height_m} m AGL`);
         if (d.speed_mps != null) bits.push(`${d.speed_mps} m/s`);
         if (d.heading != null) bits.push(`${d.heading}°`);
         return `<div class="row" data-mac="${esc(d.mac)}">
@@ -336,8 +359,7 @@ class DarsMapCard extends HTMLElement {
       <div style="font-weight:700;color:${color || '#00FF41'}">${esc(d.id || d.mac)}</div>
       ${line('Source', d.source)}
       ${line('RSSI', d.rssi != null ? d.rssi + ' dBm' : '')}
-      ${line('Altitude', d.altitude_m != null ? d.altitude_m + ' m' : '')}
-      ${line('Height', d.height_m != null ? d.height_m + ' m' : '')}
+      ${line('Height', d.height_m != null ? d.height_m + ' m AGL' : '')}
       ${line('Speed', d.speed_mps != null ? d.speed_mps + ' m/s' : '')}
       ${line('Heading', d.heading != null ? d.heading + '°' : '')}
       ${tlat != null ? `<div><b>Take-off:</b> ${esc(tlat)}, ${esc(tlon)}</div>` : ''}
@@ -360,11 +382,17 @@ if (!customElements.get('dars-map-card')) {
 const DARS_EDITOR_SCHEMA = [
   { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
   { name: 'title', selector: { text: {} } },
+  { name: 'map_style', selector: { select: { mode: 'dropdown', options: [
+    { value: 'Streets', label: 'Streets' },
+    { value: 'Dark', label: 'Dark' },
+    { value: 'Satellite', label: 'Satellite' },
+  ] } } },
   { name: 'show_takeoff', selector: { boolean: {} } },
 ];
 const DARS_EDITOR_LABELS = {
   entity: 'Drones entity',
   title: 'Card title',
+  map_style: 'Map style',
   show_takeoff: 'Show take-off location',
 };
 
