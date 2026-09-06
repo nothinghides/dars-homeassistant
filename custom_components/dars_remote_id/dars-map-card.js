@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.6.1';
+const DARS_CARD_VERSION = '0.6.2';
 const LEAFLET_VER = '1.9.4';
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
